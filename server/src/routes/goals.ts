@@ -1,0 +1,1 @@
+export { goalsRouter } from './profile';

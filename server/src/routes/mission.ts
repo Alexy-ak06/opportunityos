@@ -1,0 +1,1 @@
+export { missionRouter } from './profile';
