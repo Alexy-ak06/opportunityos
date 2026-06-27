@@ -8,6 +8,7 @@ import { opportunitiesRouter } from './routes/opportunities';
 import { profileRouter } from './routes/profile';
 import { goalsRouter } from './routes/goals';
 import { missionRouter } from './routes/mission';
+import { adminRouter } from './routes/admin';
 
 export function createApp() {
   const app = express();
@@ -29,6 +30,7 @@ export function createApp() {
   app.use('/api/profile', profileRouter);
   app.use('/api/goals', goalsRouter);
   app.use('/api/mission', missionRouter);
+  app.use('/api/admin', adminRouter);
 
   // ─── 404 ────────────────────────────────────────────────────────────────────
   app.use((_req, res) => {

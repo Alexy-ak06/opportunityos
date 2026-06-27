@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { OpportunityModel } from '../models/Opportunity';
 import { computeROI } from '@opportunityos/shared';
 import type { OpportunityStatus, DecisionAction } from '@opportunityos/shared';
+import { scheduleDeadlineAlerts, cancelDeadlineAlerts } from '../jobs/deadlineGuardian';
 
 export const opportunitiesRouter = Router();
 
@@ -75,6 +76,16 @@ opportunitiesRouter.post('/', async (req: Request, res: Response) => {
 
   // Emit socket event (attached in index.ts)
   req.app.get('io')?.emit('opportunity:new', opportunity.toJSON());
+
+  // Schedule deadline alerts
+  const dq = req.app.get('deadlineQueue');
+  if (dq) {
+    await scheduleDeadlineAlerts(dq, opportunity._id.toString(), opportunity.title, {
+      registrationDeadline: opportunity.dates?.registrationDeadline,
+      submissionDeadline:   opportunity.dates?.submissionDeadline,
+      eventDate:            opportunity.dates?.eventDate,
+    });
+  }
 
   return res.status(201).json({ success: true, data: opportunity });
 });
@@ -171,6 +182,20 @@ opportunitiesRouter.patch('/:id', async (req: Request, res: Response) => {
   await opportunity.save();
 
   req.app.get('io')?.emit('opportunity:updated', opportunity.toJSON());
+
+  // Reschedule alerts if dates changed, cancel if skipped/completed/expired
+  const dq2 = req.app.get('deadlineQueue');
+  if (dq2) {
+    if (['skipped','completed','expired'].includes(opportunity.status)) {
+      await cancelDeadlineAlerts(dq2, opportunity._id.toString());
+    } else if (rest.dates) {
+      await scheduleDeadlineAlerts(dq2, opportunity._id.toString(), opportunity.title, {
+        registrationDeadline: opportunity.dates?.registrationDeadline,
+        submissionDeadline:   opportunity.dates?.submissionDeadline,
+        eventDate:            opportunity.dates?.eventDate,
+      });
+    }
+  }
 
   return res.json({ success: true, data: opportunity });
 });

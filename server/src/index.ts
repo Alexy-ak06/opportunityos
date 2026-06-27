@@ -5,6 +5,8 @@ import { config } from './config';
 import { connectMongo } from './config/mongo';
 import { setupSocket } from './socket';
 import { createScoreRecomputeQueue, createScoreRecomputeWorker } from './jobs/scoreRecompute';
+import { createDeadlineQueue, createDeadlineWorker, scheduleDeadlineAlerts } from './jobs/deadlineGuardian';
+import { OpportunityModel } from './models/Opportunity';
 
 async function main() {
   // ─── Connect infrastructure ─────────────────────────────────────────────────
@@ -15,14 +17,39 @@ async function main() {
   const httpServer = http.createServer(app);
   const io = setupSocket(httpServer);
 
-  // Make io available to route handlers via app locals
   app.set('io', io);
 
-  // ─── BullMQ workers ──────────────────────────────────────────────────────────
-  const scoreQueue = createScoreRecomputeQueue();
-  createScoreRecomputeWorker(io);
+  // ─── BullMQ queues + workers ─────────────────────────────────────────────────
+  const scoreQueue    = createScoreRecomputeQueue();
+  const deadlineQueue = createDeadlineQueue();
 
-  // ─── Cron: recompute scores every hour ──────────────────────────────────────
+  createScoreRecomputeWorker(io);
+  createDeadlineWorker(io);
+
+  // Make deadline queue available to routes (admin endpoint)
+  app.set('deadlineQueue', deadlineQueue);
+
+  // ─── Schedule alerts for all active opportunities on startup ─────────────────
+  const activeOpps = await OpportunityModel.find({
+    status: { $in: ['new', 'shortlisted', 'registered', 'in_progress'] },
+  }).lean();
+
+  for (const opp of activeOpps) {
+    await scheduleDeadlineAlerts(
+      deadlineQueue,
+      opp._id.toString(),
+      opp.title,
+      {
+        registrationDeadline: opp.dates?.registrationDeadline,
+        submissionDeadline:   opp.dates?.submissionDeadline,
+        eventDate:            opp.dates?.eventDate,
+      }
+    );
+  }
+
+  console.log(`⏰ Deadline Guardian: scheduled alerts for ${activeOpps.length} opportunities`);
+
+  // ─── Cron: recompute scores every hour ───────────────────────────────────────
   cron.schedule('0 * * * *', async () => {
     await scoreQueue.add('recompute', {}, { removeOnComplete: 10, removeOnFail: 5 });
   });
@@ -30,7 +57,7 @@ async function main() {
   // Run once on startup
   await scoreQueue.add('recompute-startup', {}, { removeOnComplete: 1 });
 
-  // ─── Start listening ─────────────────────────────────────────────────────────
+  // ─── Start listening ──────────────────────────────────────────────────────────
   httpServer.listen(config.port, () => {
     console.log(`
 ╔═══════════════════════════════════════════════╗
@@ -43,9 +70,11 @@ async function main() {
     `);
   });
 
-  // ─── Graceful shutdown ───────────────────────────────────────────────────────
+  // ─── Graceful shutdown ────────────────────────────────────────────────────────
   const shutdown = async (signal: string) => {
     console.log(`\n${signal} received. Shutting down gracefully...`);
+    await deadlineQueue.close();
+    await scoreQueue.close();
     httpServer.close(() => process.exit(0));
   };
 
