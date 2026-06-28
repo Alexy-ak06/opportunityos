@@ -5,6 +5,9 @@ import CommandCenter from './pages/CommandCenter';
 import OpportunityFeed from './pages/OpportunityFeed';
 import GoalsPage from './pages/Goals';
 import DeadlineToast from './components/panels/DeadlineToast';
+import Analytics from './pages/Analytics';
+import Community from './pages/Community';
+import Automation from './pages/Automation';
 
 const NAV = [
   { to: '/',              icon: '⌘', label: 'Command Center' },
@@ -210,9 +213,10 @@ export default function App() {
               <Route path="/"              element={<CommandCenter />} />
               <Route path="/opportunities" element={<OpportunityFeed />} />
               <Route path="/goals"         element={<GoalsPage />} />
-              <Route path="/analytics"     element={<PlaceholderPage title="ANALYTICS" />} />
-              <Route path="/community"     element={<PlaceholderPage title="COMMUNITY" />} />
-              <Route path="/automation"    element={<PlaceholderPage title="AUTOMATION" />} />
+              <Route path="/analytics" element={<Analytics />} />
+<Route path="/community" element={<Community />} />
+<Route path="/automation" element={<Automation />} />
+
             </Routes>
           </main>
         </div>
