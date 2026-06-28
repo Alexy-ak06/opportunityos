@@ -1,200 +1,255 @@
 import { useEffect, useState, useCallback } from 'react';
-import { motion } from 'framer-motion';
-import { Search, Filter, Plus, ExternalLink } from 'lucide-react';
 import { opportunitiesApi } from '../lib/api';
 import { getSocket } from '../lib/socket';
-import { getScoreBand, CATEGORY_META } from '@opportunityos/shared';
+import { CATEGORY_META } from '@opportunityos/shared';
 import type { Opportunity, OpportunityStatus } from '@opportunityos/shared';
-import { formatDistanceToNow } from 'date-fns';
 
-const STATUS_COLORS: Record<OpportunityStatus, string> = {
-  new:         'border-blue-500/40 text-blue-400',
-  shortlisted: 'border-yellow-500/40 text-yellow-400',
-  registered:  'border-green-500/40 text-green-400',
-  in_progress: 'border-purple-500/40 text-purple-400',
-  completed:   'border-gray-500/40 text-gray-400',
-  skipped:     'border-gray-700/40 text-gray-600',
-  expired:     'border-red-900/40 text-red-800',
+const STATUS_COLORS: Record<string, string> = {
+  new:         'var(--cyan)',
+  shortlisted: 'var(--yellow)',
+  registered:  'var(--green)',
+  in_progress: 'var(--purple)',
+  completed:   'var(--muted)',
+  skipped:     'var(--muted)',
+  expired:     'var(--magenta)',
 };
+
+const SORTS = [
+  { key: 'roi',      label: '⚡ ROI'      },
+  { key: 'deadline', label: '🕐 DEADLINE' },
+  { key: 'created',  label: '🕓 LATEST'   },
+];
 
 export default function OpportunityFeed() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
-  const [total, setTotal] = useState(0);
-  const [filter, setFilter] = useState({ status: '', category: '', sort: 'roi' as const });
+  const [total, setTotal]     = useState(0);
   const [loading, setLoading] = useState(true);
+  const [sort, setSort]       = useState('roi');
+  const [category, setCategory] = useState('');
+  const [status, setStatus]   = useState('');
 
   const fetchOps = useCallback(async () => {
     setLoading(true);
     try {
       const res = await opportunitiesApi.list({
-        sort: filter.sort,
-        status: filter.status || undefined,
-        category: filter.category || undefined,
-        limit: 50,
+        sort: sort as any, limit: 50,
+        category: category || undefined,
+        status:   status   || undefined,
       });
       setOpportunities(res.data.data);
       setTotal(res.data.total);
-    } finally {
-      setLoading(false);
-    }
-  }, [filter]);
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  }, [sort, category, status]);
 
   useEffect(() => { fetchOps(); }, [fetchOps]);
 
-  // Real-time updates
   useEffect(() => {
-    const socket = getSocket();
-    socket.on('opportunity:new',     (op: Opportunity) => setOpportunities(p => [op, ...p]));
-    socket.on('opportunity:updated', (op: Opportunity) => setOpportunities(p => p.map(o => o._id === op._id ? op : o)));
-    return () => { socket.off('opportunity:new'); socket.off('opportunity:updated'); };
+    const s = getSocket();
+    s.on('opportunity:new',     (op: Opportunity) => setOpportunities(p => [op, ...p]));
+    s.on('opportunity:updated', (op: Opportunity) => setOpportunities(p => p.map(o => o._id === op._id ? op : o)));
+    return () => { s.off('opportunity:new'); s.off('opportunity:updated'); };
   }, []);
 
-  const quickAction = async (id: string, status: OpportunityStatus, reason?: string) => {
-    await opportunitiesApi.update(id, { status, decisionReason: reason });
-    setOpportunities(prev => prev.map(o => o._id === id ? { ...o, status } : o));
+  const quickAction = async (id: string, newStatus: string) => {
+    try {
+      await opportunitiesApi.update(id, { status: newStatus as any });
+      setOpportunities(p => p.map(o => o._id === id ? { ...o, status: newStatus as any } : o));
+    } catch (e) { console.error(e); }
   };
 
   return (
-    <motion.div
-      className="p-6 space-y-4"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
-    >
+    <div style={{ padding: 12, fontFamily: 'var(--font-mono)' }}>
+
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div>
-          <h1 className="text-xl font-bold text-white">Opportunity Radar</h1>
-          <p className="text-xs text-gray-500 font-mono mt-0.5">{total} total · ranked by ROI</p>
+          <div style={{ fontFamily: 'var(--font-hd)', fontSize: 14, fontWeight: 900, color: 'var(--cyan)', textShadow: '0 0 20px rgba(0,245,255,0.6)', letterSpacing: '0.15em' }}>
+            // OPPORTUNITY RADAR
+          </div>
+          <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 3, letterSpacing: '0.08em' }}>
+            {total} TOTAL · RANKED BY {sort.toUpperCase()} · LIVE
+          </div>
         </div>
-        <button className="btn-primary flex items-center gap-2">
-          <Plus size={14} />
-          Add Opportunity
-        </button>
+        <button style={{
+          background: 'linear-gradient(135deg,rgba(0,245,255,0.15),rgba(180,77,255,0.15))',
+          border: '1px solid rgba(0,245,255,0.35)',
+          borderRadius: 3, padding: '7px 14px',
+          fontFamily: 'var(--font-hd)', fontSize: 9, fontWeight: 700,
+          color: 'var(--cyan)', cursor: 'pointer', letterSpacing: '0.1em',
+          textShadow: '0 0 8px rgba(0,245,255,0.5)',
+          boxShadow: '0 0 15px rgba(0,245,255,0.1)',
+        }}>+ ADD OPPORTUNITY</button>
       </div>
 
       {/* Filters */}
-      <div className="flex gap-2 flex-wrap">
-        {['roi', 'deadline', 'created'].map(s => (
-          <button
-            key={s}
-            onClick={() => setFilter(f => ({ ...f, sort: s as typeof filter.sort }))}
-            className={`px-3 py-1 rounded-lg text-xs font-mono transition-colors ${
-              filter.sort === s ? 'bg-accent-500 text-white' : 'bg-surface-700 text-gray-400 hover:text-white'
-            }`}
-          >
-            {s === 'roi' ? '⚡ ROI' : s === 'deadline' ? '🕐 Deadline' : '🕓 Latest'}
-          </button>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+        {SORTS.map(({ key, label }) => (
+          <button key={key} onClick={() => setSort(key)} style={{
+            padding: '4px 10px', borderRadius: 2, fontSize: 8,
+            fontFamily: 'var(--font-mono)', cursor: 'pointer',
+            border: `1px solid ${sort === key ? 'rgba(0,245,255,0.4)' : 'var(--border2)'}`,
+            background: sort === key ? 'rgba(0,245,255,0.08)' : 'transparent',
+            color: sort === key ? 'var(--cyan)' : 'var(--muted)',
+            textShadow: sort === key ? '0 0 8px rgba(0,245,255,0.5)' : 'none',
+            transition: 'all 0.2s', letterSpacing: '0.05em',
+          }}>{label}</button>
         ))}
 
-        <select
-          value={filter.category}
-          onChange={e => setFilter(f => ({ ...f, category: e.target.value }))}
-          className="bg-surface-700 text-gray-300 text-xs rounded-lg px-3 py-1 border border-surface-600 font-mono"
-        >
-          <option value="">All categories</option>
+        <select value={category} onChange={e => setCategory(e.target.value)} style={{
+          background: 'var(--bg2)', border: '1px solid var(--border2)',
+          borderRadius: 2, padding: '4px 8px',
+          color: 'var(--muted)', fontSize: 8,
+          fontFamily: 'var(--font-mono)', cursor: 'pointer',
+          letterSpacing: '0.05em',
+        }}>
+          <option value="">ALL CATEGORIES</option>
           {Object.entries(CATEGORY_META).map(([k, v]) => (
-            <option key={k} value={k}>{v.icon} {v.label}</option>
+            <option key={k} value={k}>{v.icon} {v.label.toUpperCase()}</option>
           ))}
         </select>
 
-        <select
-          value={filter.status}
-          onChange={e => setFilter(f => ({ ...f, status: e.target.value }))}
-          className="bg-surface-700 text-gray-300 text-xs rounded-lg px-3 py-1 border border-surface-600 font-mono"
-        >
-          <option value="">All statuses</option>
+        <select value={status} onChange={e => setStatus(e.target.value)} style={{
+          background: 'var(--bg2)', border: '1px solid var(--border2)',
+          borderRadius: 2, padding: '4px 8px',
+          color: 'var(--muted)', fontSize: 8,
+          fontFamily: 'var(--font-mono)', cursor: 'pointer',
+          letterSpacing: '0.05em',
+        }}>
+          <option value="">ALL STATUSES</option>
           {['new','shortlisted','registered','in_progress','completed','skipped','expired'].map(s => (
-            <option key={s} value={s}>{s}</option>
+            <option key={s} value={s}>{s.toUpperCase()}</option>
           ))}
         </select>
       </div>
 
       {/* List */}
       {loading ? (
-        <div className="space-y-2">
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="card animate-pulse h-20 bg-surface-700" />
-          ))}
+        <div style={{ fontSize: 9, color: 'var(--muted)', fontFamily: 'var(--font-hd)', letterSpacing: '0.1em', padding: 20 }}>
+          SCANNING MATRIX...
         </div>
       ) : (
-        <div className="space-y-2">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
           {opportunities.map((op, i) => {
-            const band = getScoreBand(op.currentScore);
-            const deadline = op.dates?.registrationDeadline ?? op.dates?.submissionDeadline;
-            const daysLeft = deadline
-              ? Math.ceil((new Date(deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-              : null;
+            const reg = op.dates?.registrationDeadline ?? op.dates?.submissionDeadline;
+            const daysLeft = reg ? Math.ceil((new Date(reg).getTime() - Date.now()) / 86400000) : null;
             const isUrgent = daysLeft !== null && daysLeft <= 3;
+            const isHot    = daysLeft !== null && daysLeft <= 7;
+            const scoreColor = op.currentScore >= 90 ? 'var(--green)'
+              : op.currentScore >= 70 ? 'var(--cyan)'
+              : op.currentScore >= 50 ? 'var(--yellow)'
+              : 'var(--magenta)';
+            const deadlineColor = isUrgent ? 'var(--magenta)' : isHot ? 'var(--yellow)' : 'var(--muted)';
+            const statusColor = STATUS_COLORS[op.status] ?? 'var(--muted)';
 
             return (
-              <motion.div
-                key={op._id ?? i}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.03 }}
-                className="card flex items-center gap-4 hover:border-accent-500/30 transition-all group"
+              <div key={op._id ?? i} style={{
+                background: 'var(--bg2)',
+                border: `1px solid ${isUrgent ? 'rgba(255,45,120,0.15)' : 'var(--border2)'}`,
+                borderRadius: 3, padding: '8px 10px',
+                display: 'flex', alignItems: 'center', gap: 8,
+                position: 'relative', overflow: 'hidden',
+                transition: 'all 0.2s', cursor: 'pointer',
+              }}
+                onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(0,245,255,0.2)')}
+                onMouseLeave={e => (e.currentTarget.style.borderColor = isUrgent ? 'rgba(255,45,120,0.15)' : 'var(--border2)')}
               >
-                {/* Rank */}
-                <div className="text-xs text-gray-600 font-mono w-5 text-center shrink-0">#{i + 1}</div>
+                {/* Top accent on urgent */}
+                {isUrgent && <div style={{
+                  position: 'absolute', top: 0, left: 0, right: 0, height: 1,
+                  background: 'linear-gradient(90deg,transparent,var(--magenta),transparent)',
+                  opacity: 0.6,
+                }} />}
 
-                {/* Score */}
-                <div
-                  className="w-12 h-12 rounded-lg flex items-center justify-center text-sm font-bold font-mono shrink-0"
-                  style={{ background: band.color + '18', color: band.color, border: `1px solid ${band.color}33` }}
-                >
-                  {op.currentScore}
+                {/* Rank */}
+                <div style={{ fontSize: 9, color: 'var(--muted)', width: 18, fontFamily: 'var(--font-hd)', flexShrink: 0 }}>
+                  #{i + 1}
                 </div>
 
+                {/* Score */}
+                <div style={{
+                  width: 32, height: 32, borderRadius: 3, flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontFamily: 'var(--font-hd)', fontSize: 10, fontWeight: 900,
+                  color: scoreColor, background: `${scoreColor}10`,
+                  border: `1px solid ${scoreColor}25`,
+                  textShadow: `0 0 8px ${scoreColor}80`,
+                }}>{op.currentScore}</div>
+
                 {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-white truncate">{op.title}</span>
-                    <a href={op.url} target="_blank" rel="noreferrer" className="text-gray-600 hover:text-accent-400 shrink-0">
-                      <ExternalLink size={12} />
-                    </a>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 11, color: 'var(--text)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {op.title}
+                    </span>
+                    <a href={op.url} target="_blank" rel="noreferrer" style={{ color: 'var(--muted)', fontSize: 10, flexShrink: 0, textDecoration: 'none' }}>↗</a>
                   </div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className={`status-chip ${STATUS_COLORS[op.status]}`}>{op.status}</span>
-                    <span className="text-xs text-gray-500">{CATEGORY_META[op.category]?.icon} {op.organizer}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                    <span style={{
+                      fontSize: 8, padding: '1px 5px', borderRadius: 2,
+                      border: `1px solid ${statusColor}25`,
+                      background: `${statusColor}08`, color: statusColor,
+                      letterSpacing: '0.06em',
+                    }}>{op.status.toUpperCase()}</span>
+                    <span style={{ fontSize: 8, color: 'var(--muted)' }}>
+                      {CATEGORY_META[op.category]?.icon} {op.organizer ?? op.source}
+                    </span>
                     {daysLeft !== null && (
-                      <span className={isUrgent ? 'deadline-urgent' : 'deadline-normal'}>
-                        {isUrgent ? '🔥 ' : ''}{daysLeft}d left
+                      <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: deadlineColor, textShadow: isUrgent ? `0 0 6px ${deadlineColor}` : 'none' }}>
+                        {isUrgent ? '🔥 ' : ''}{daysLeft}d LEFT
                       </span>
                     )}
                   </div>
                 </div>
 
-                {/* Quick actions */}
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                {/* Score bars mini */}
+                <div style={{ width: 80, flexShrink: 0 }}>
+                  {['resumeValue','learningValue','placementValue'].map((k, idx) => {
+                    const val = op.baseScores?.[k as keyof typeof op.baseScores] ?? 5;
+                    const colors = ['var(--purple)','var(--cyan)','var(--green)'];
+                    return (
+                      <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                        <div style={{ flex: 1, height: 2, background: 'rgba(255,255,255,0.04)', borderRadius: 1, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${val * 10}%`, background: colors[idx], borderRadius: 1 }} />
+                        </div>
+                        <span style={{ fontSize: 7, color: 'var(--muted)', width: 8 }}>{val}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
                   {op.status === 'new' && (
-                    <button
-                      onClick={() => quickAction(op._id!, 'shortlisted')}
-                      className="text-xs px-2 py-1 rounded bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25 transition-colors"
-                    >
-                      ★ Save
-                    </button>
+                    <button onClick={e => { e.stopPropagation(); quickAction(op._id!, 'shortlisted'); }} style={{
+                      fontSize: 8, padding: '3px 7px', borderRadius: 2,
+                      border: '1px solid rgba(255,230,0,0.35)', color: 'var(--yellow)',
+                      background: 'transparent', cursor: 'pointer',
+                      fontFamily: 'var(--font-hd)', fontWeight: 700, letterSpacing: '0.05em',
+                    }}>★ SAVE</button>
                   )}
                   {['new','shortlisted'].includes(op.status) && (
-                    <button
-                      onClick={() => quickAction(op._id!, 'registered')}
-                      className="text-xs px-2 py-1 rounded bg-green-500/15 text-green-400 hover:bg-green-500/25 transition-colors"
-                    >
-                      ✓ Register
-                    </button>
+                    <button onClick={e => { e.stopPropagation(); quickAction(op._id!, 'registered'); }} style={{
+                      fontSize: 8, padding: '3px 7px', borderRadius: 2,
+                      border: '1px solid rgba(0,255,159,0.35)', color: 'var(--green)',
+                      background: 'transparent', cursor: 'pointer',
+                      fontFamily: 'var(--font-hd)', fontWeight: 700, letterSpacing: '0.05em',
+                    }}>✓ REG</button>
                   )}
                   {!['completed','skipped','expired'].includes(op.status) && (
-                    <button
-                      onClick={() => quickAction(op._id!, 'skipped', 'Not relevant right now')}
-                      className="text-xs px-2 py-1 rounded bg-gray-500/15 text-gray-500 hover:bg-gray-500/25 transition-colors"
-                    >
-                      Skip
-                    </button>
+                    <button onClick={e => { e.stopPropagation(); quickAction(op._id!, 'skipped'); }} style={{
+                      fontSize: 8, padding: '3px 7px', borderRadius: 2,
+                      border: '1px solid var(--border2)', color: 'var(--muted)',
+                      background: 'transparent', cursor: 'pointer',
+                      fontFamily: 'var(--font-hd)', fontWeight: 700, letterSpacing: '0.05em',
+                    }}>SKIP</button>
                   )}
                 </div>
-              </motion.div>
+              </div>
             );
           })}
         </div>
       )}
-    </motion.div>
+    </div>
   );
 }
