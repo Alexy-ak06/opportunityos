@@ -8,6 +8,7 @@ import DeadlineToast from './components/panels/DeadlineToast';
 import Analytics from './pages/Analytics';
 import Community from './pages/Community';
 import Automation from './pages/Automation';
+import CommandPalette from './components/panels/CommandPalette';
 
 const NAV = [
   { to: '/',              icon: '⌘', label: 'Command Center' },
@@ -221,6 +222,7 @@ export default function App() {
           </main>
         </div>
       </div>
+      <CommandPalette />
       <DeadlineToast />
     </BrowserRouter>
   );
